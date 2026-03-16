@@ -9,6 +9,7 @@ import {
   Zap, BarChart2, ArrowRight, Github, Twitter, Linkedin, Sun, Moon,
   Maximize2, X, Menu, PanelLeftClose
 } from "lucide-react";
+import html2canvas from "html2canvas";
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -391,8 +392,9 @@ function ToolPage({ onBack, dark, onToggleDark }) {
   // responsive breakpoint
   const [isMobile, setIsMobile]         = useState(window.innerWidth < 768);
 
-  const fileInputRef = useRef(null);
-  const chatEndRef   = useRef(null);
+  const fileInputRef  = useRef(null);
+  const chatEndRef    = useRef(null);
+  const chartRefsMap  = useRef({});
   const t = dark ? T.dark : T.light;
 
   useEffect(() => {
@@ -494,6 +496,7 @@ function ToolPage({ onBack, dark, onToggleDark }) {
     return (
       <div
         key={index}
+        ref={!isFullscreen ? (el) => { if (el) chartRefsMap.current[index] = el; } : null}
         style={{ background: t.chartCard, borderRadius: isFullscreen ? 0 : 18, padding: isFullscreen ? 0 : 24, border: isFullscreen ? "none" : `1px solid ${t.chartCardBorder}`, boxShadow: isFullscreen ? "none" : "0 4px 20px rgba(0,0,0,0.06)", transition: "background 0.4s, border-color 0.4s", height: isFullscreen ? "100%" : "auto" }}
       >
         {!isFullscreen && (
@@ -786,29 +789,66 @@ function ToolPage({ onBack, dark, onToggleDark }) {
 
               {/* Download Report button */}
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (!dashboard) return;
+
                   const date = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+
+                  // Use html2canvas to screenshot each chart card node directly
+                  const chartPngs = await Promise.all(
+                    (dashboard.charts || []).map(async (_, i) => {
+                      const node = chartRefsMap.current[i];
+                      if (!node) return null;
+                      try {
+                        const canvas = await html2canvas(node, {
+                          backgroundColor: "#ffffff",
+                          scale: 2,
+                          useCORS: true,
+                          logging: false,
+                        });
+                        return canvas.toDataURL("image/png");
+                      } catch {
+                        return null;
+                      }
+                    })
+                  );
+
                   const insightsHtml = (dashboard.insights || []).map((ins, i) =>
                     `<div class="insight"><span class="ins-num">${String(i + 1).padStart(2, "0")}</span><p>${ins}</p></div>`
                   ).join("");
-                  const chartsHtml = (dashboard.charts || []).map(c =>
-                    `<div class="chart-desc"><div class="chart-type">${c.type.toUpperCase()} CHART</div><div class="chart-title">${c.title || ""}</div>${c.description ? `<p class="chart-p">${c.description}</p>` : ""}<p class="chart-p">Plotting <strong>${c.yAxisKey}</strong> against <strong>${c.xAxisKey}</strong>.</p></div>`
+
+                  const chartsHtml = (dashboard.charts || []).map((c, i) =>
+                    `<div class="chart-wrap">
+                      <div class="chart-meta">
+                        <span class="chart-type">${c.type.toUpperCase()} CHART</span>
+                        <span class="chart-title">${c.title || ""}</span>
+                        ${c.description ? `<p class="chart-p">${c.description}</p>` : ""}
+                      </div>
+                      ${chartPngs[i]
+                        ? `<img src="${chartPngs[i]}" width="760" style="display:block;border-radius:8px;border:1px solid #e8e8f0;" />`
+                        : `<p class="chart-p">Plotting <strong>${c.yAxisKey}</strong> against <strong>${c.xAxisKey}</strong>.</p>`
+                      }
+                    </div>`
                   ).join("");
+
                   const maxRows = 50;
                   const rows = (tableData?.rows || []).slice(0, maxRows);
                   const cols = tableData?.columns || [];
                   const theadHtml = cols.map(c => `<th>${c}</th>`).join("");
                   const tbodyHtml = rows.map(r => `<tr>${cols.map(c => `<td>${r[c] ?? "—"}</td>`).join("")}</tr>`).join("");
-                  const tableHtml = cols.length ? `<table><thead><tr>${theadHtml}</tr></thead><tbody>${tbodyHtml}</tbody></table>${(tableData?.rows?.length || 0) > maxRows ? `<p class="note">Showing first ${maxRows} of ${tableData.rows.length} rows.</p>` : ""}` : "<p class='note'>No results available.</p>";
+                  const tableHtml = cols.length
+                    ? `<table><thead><tr>${theadHtml}</tr></thead><tbody>${tbodyHtml}</tbody></table>${(tableData?.rows?.length || 0) > maxRows ? `<p class="note">Showing first ${maxRows} of ${tableData.rows.length} rows.</p>` : ""}`
+                    : "<p class='note'>No results available.</p>";
                   const followUpHistoryHtml = queryHistory.length > 1
-                    ? `<div class="section"><div class="section-title">Query History</div>${queryHistory.map((h, i) => `<div class="chart-desc"><div class="chart-type">Query ${i + 1}</div><div class="chart-title">${h.question}</div><p class="chart-p">${h.summary}</p></div>`).join("")}</div>`
+                    ? `<div class="section"><div class="section-title">Query History</div>${queryHistory.map((h, i) => `<div class="chart-wrap"><div class="chart-meta"><span class="chart-type">Query ${i + 1}</span><span class="chart-title">${h.question}</span><p class="chart-p">${h.summary}</p></div></div>`).join("")}</div>`
                     : "";
-                  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/><title>${dashboard.title} — InstantBI Report</title><style>@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800&family=DM+Sans:wght@300;400;500;700&display=swap');*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}body{font-family:'DM Sans',sans-serif;background:#fff;color:#1a1a2e;padding:56px 64px;max-width:900px;margin:0 auto}.header{border-bottom:3px solid #6366f1;padding-bottom:28px;margin-bottom:36px}.brand{display:flex;align-items:center;gap:10px;margin-bottom:28px}.brand-icon{width:36px;height:36px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:9px;display:flex;align-items:center;justify-content:center}.brand-name{font-family:'Playfair Display',serif;font-size:20px;font-weight:800;color:#0d0b1a}.brand-name span{color:#6366f1}.meta{font-size:11px;font-weight:700;color:#6366f1;letter-spacing:2px;text-transform:uppercase;margin-bottom:10px}h1{font-family:'Playfair Display',serif;font-size:34px;font-weight:800;color:#0d0b1a;line-height:1.1;margin-bottom:12px}.summary{font-size:15px;color:#444;line-height:1.75;font-weight:300;max-width:640px}.date{font-size:11px;color:#aaa;margin-top:10px;letter-spacing:1px}.section{margin-bottom:40px}.section-title{font-size:10px;font-weight:700;color:#6366f1;letter-spacing:3px;text-transform:uppercase;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid #e8e8f0}.insight{display:flex;gap:16px;align-items:flex-start;margin-bottom:14px;background:#f5f5ff;border-radius:12px;padding:14px 18px}.ins-num{font-family:'Playfair Display',serif;font-size:28px;font-weight:900;color:#6366f1;opacity:.25;line-height:1;flex-shrink:0;width:36px}.insight p{font-size:13px;color:#333;line-height:1.65;padding-top:4px}.chart-desc{background:#fafafa;border:1px solid #e8e8f0;border-radius:12px;padding:18px 22px;margin-bottom:12px}.chart-type{font-size:9px;font-weight:700;color:#8b5cf6;letter-spacing:2.5px;text-transform:uppercase;margin-bottom:4px}.chart-title{font-size:15px;font-weight:700;color:#0d0b1a;margin-bottom:6px}.chart-p{font-size:13px;color:#555;line-height:1.6;font-weight:300}table{width:100%;border-collapse:collapse;font-size:12px}thead tr{background:#6366f1;color:white}thead th{padding:10px 13px;text-align:left;font-weight:700;font-size:10px;letter-spacing:.5px;text-transform:uppercase}tbody tr:nth-child(even){background:#f5f5ff}tbody tr:nth-child(odd){background:#fff}tbody td{padding:9px 13px;color:#333;border-bottom:1px solid #eee}.note{font-size:11px;color:#aaa;margin-top:8px}.footer{margin-top:56px;padding-top:20px;border-top:1px solid #e8e8f0;display:flex;justify-content:space-between;font-size:11px;color:#bbb}@media print{body{padding:32px 40px}}</style></head><body><div class="header"><div class="brand"><div class="brand-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></div><div class="brand-name">Instant<span>BI</span></div></div><div class="meta">Analytics Report</div><h1>${dashboard.title}</h1><p class="summary">${dashboard.summary}</p><p class="date">Generated on ${date}</p></div>${insightsHtml ? `<div class="section"><div class="section-title">Key Insights</div>${insightsHtml}</div>` : ""}${chartsHtml ? `<div class="section"><div class="section-title">Visualizations</div>${chartsHtml}</div>` : ""}${followUpHistoryHtml}<div class="section"><div class="section-title">Results Table</div>${tableHtml}</div><div class="footer"><span>InstantBI · AI Analytics Engine</span><span>${date}</span></div><script>window.onload=()=>{window.print();}<\/script></body></html>`;
+
+                  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/><title>${dashboard.title} — InstantBI Report</title><style>@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800&family=DM+Sans:wght@300;400;500;700&display=swap');*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}body{font-family:'DM Sans',sans-serif;background:#fff;color:#1a1a2e;padding:56px 64px;max-width:900px;margin:0 auto}.header{border-bottom:3px solid #6366f1;padding-bottom:28px;margin-bottom:36px}.brand{display:flex;align-items:center;gap:10px;margin-bottom:28px}.brand-icon{width:36px;height:36px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:9px;display:flex;align-items:center;justify-content:center}.brand-name{font-family:'Playfair Display',serif;font-size:20px;font-weight:800;color:#0d0b1a}.brand-name span{color:#6366f1}.meta{font-size:11px;font-weight:700;color:#6366f1;letter-spacing:2px;text-transform:uppercase;margin-bottom:10px}h1{font-family:'Playfair Display',serif;font-size:34px;font-weight:800;color:#0d0b1a;line-height:1.1;margin-bottom:12px}.summary{font-size:15px;color:#444;line-height:1.75;font-weight:300;max-width:640px}.date{font-size:11px;color:#aaa;margin-top:10px;letter-spacing:1px}.section{margin-bottom:40px}.section-title{font-size:10px;font-weight:700;color:#6366f1;letter-spacing:3px;text-transform:uppercase;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid #e8e8f0}.insight{display:flex;gap:16px;align-items:flex-start;margin-bottom:14px;background:#f5f5ff;border-radius:12px;padding:14px 18px}.ins-num{font-family:'Playfair Display',serif;font-size:28px;font-weight:900;color:#6366f1;opacity:.25;line-height:1;flex-shrink:0;width:36px}.insight p{font-size:13px;color:#333;line-height:1.65;padding-top:4px}.chart-wrap{background:#fafafa;border:1px solid #e8e8f0;border-radius:12px;padding:20px 22px;margin-bottom:20px}.chart-meta{margin-bottom:12px}.chart-type{font-size:9px;font-weight:700;color:#8b5cf6;letter-spacing:2.5px;text-transform:uppercase;display:block;margin-bottom:4px}.chart-title{font-size:15px;font-weight:700;color:#0d0b1a;display:block;margin-bottom:6px}.chart-p{font-size:13px;color:#555;line-height:1.6;font-weight:300;margin-top:6px}table{width:100%;border-collapse:collapse;font-size:12px}thead tr{background:#6366f1;color:white}thead th{padding:10px 13px;text-align:left;font-weight:700;font-size:10px;letter-spacing:.5px;text-transform:uppercase}tbody tr:nth-child(even){background:#f5f5ff}tbody tr:nth-child(odd){background:#fff}tbody td{padding:9px 13px;color:#333;border-bottom:1px solid #eee}.note{font-size:11px;color:#aaa;margin-top:8px}.footer{margin-top:56px;padding-top:20px;border-top:1px solid #e8e8f0;display:flex;justify-content:space-between;font-size:11px;color:#bbb}@media print{body{padding:32px 40px}}</style></head><body><div class="header"><div class="brand"><div class="brand-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></div><div class="brand-name">Instant<span>BI</span></div></div><div class="meta">Analytics Report</div><h1>${dashboard.title}</h1><p class="summary">${dashboard.summary}</p><p class="date">Generated on ${date}</p></div>${insightsHtml ? `<div class="section"><div class="section-title">Key Insights</div>${insightsHtml}</div>` : ""}${chartsHtml ? `<div class="section"><div class="section-title">Visualizations</div>${chartsHtml}</div>` : ""}${followUpHistoryHtml}<div class="section"><div class="section-title">Results Table</div>${tableHtml}</div><div class="footer"><span>InstantBI · AI Analytics Engine</span><span>${date}</span></div><script>window.onload=()=>{window.print();}<\/script></body></html>`;
+
                   const blob = new Blob([html], { type: "text/html" });
                   const url = URL.createObjectURL(blob);
                   window.open(url, "_blank");
-                  setTimeout(() => URL.revokeObjectURL(url), 10000);
+                  setTimeout(() => URL.revokeObjectURL(url), 15000);
                 }}
                 style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 18px", background: t.exportBtn, border: `1.5px solid ${t.exportBtnBorder}`, borderRadius: 12, fontSize: 12, fontWeight: 700, color: t.exportBtnText, cursor: "pointer", fontFamily: "'Syne', sans-serif", transition: "all 0.2s" }}
               >
